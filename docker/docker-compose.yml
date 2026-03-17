@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Optional: TDengine time-series database
+  # tdengine:
+  #   image: tdengine/tdengine:latest
+  #   ports:
+  #     - "6030:6030"
+  #     - "6041:6041"
+  #   volumes:
+  #     - tdengine_data:/var/lib/taos
+  #   restart: unless-stopped
+
+  # Optional: Neo4j knowledge graph
+  # neo4j:
+  #   image: neo4j:5
+  #   ports:
+  #     - "7474:7474"
+  #     - "7687:7687"
+  #   environment:
+  #     - NEO4J_AUTH=neo4j/hydroportal
+  #   volumes:
+  #     - neo4j_data:/data
+  #   restart: unless-stopped
+
+# volumes:
+#   tdengine_data:
+#   neo4j_data:
