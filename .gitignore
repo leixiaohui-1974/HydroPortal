@@ -32,5 +32,8 @@ htmlcov/
 .coverage
 coverage/
 
+# Data (SQLite databases)
+data/
+
 # Docker
 docker/*.log

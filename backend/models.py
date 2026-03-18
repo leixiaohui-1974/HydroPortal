@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -57,7 +57,7 @@ class SkillResponse(BaseModel):
 class HealthStatus(BaseModel):
     portal: str = "ok"
     apps: dict[str, str] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ToolInfo(BaseModel):
@@ -96,7 +96,7 @@ class Alert(BaseModel):
     station_id: str
     level: str  # info / warning / critical
     message: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     acknowledged: bool = False
 
 

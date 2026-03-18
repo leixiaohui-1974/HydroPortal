@@ -2,77 +2,66 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from backend import config
 
 # ---------------------------------------------------------------------------
-# In-memory user store (demo)
+# Password hashing
+# ---------------------------------------------------------------------------
+
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ---------------------------------------------------------------------------
+# In-memory user store (demo) — passwords are bcrypt hashes
 # ---------------------------------------------------------------------------
 
 DEMO_USERS: dict[str, dict[str, str]] = {
     "admin": {
-        "password": "admin123",
+        "password": _pwd_context.hash("admin123"),
         "role": "admin",
         "display_name": "系统管理员",
     },
     "designer": {
-        "password": "design123",
+        "password": _pwd_context.hash("design123"),
         "role": "designer",
         "display_name": "设计工程师",
     },
     "operator": {
-        "password": "oper123",
+        "password": _pwd_context.hash("oper123"),
         "role": "operator",
         "display_name": "调度员",
     },
 }
 
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a plaintext password against a bcrypt hash."""
+    return _pwd_context.verify(plain_password, hashed_password)
+
+
 # ---------------------------------------------------------------------------
-# JWT helpers (HMAC-SHA256, no dependency on python-jose at runtime)
+# JWT helpers (python-jose)
 # ---------------------------------------------------------------------------
-
-def _b64url_encode(data: bytes) -> str:
-    import base64
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def _b64url_decode(s: str) -> bytes:
-    import base64
-    s += "=" * (-len(s) % 4)
-    return base64.urlsafe_b64decode(s)
 
 
 def create_jwt(payload: dict[str, Any], secret: str = config.JWT_SECRET) -> str:
-    """Create a simple HMAC-SHA256 JWT."""
-    header = {"alg": "HS256", "typ": "JWT"}
-    h = _b64url_encode(json.dumps(header).encode())
-    p = _b64url_encode(json.dumps(payload, default=str).encode())
-    sig = hmac.new(secret.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()
-    return f"{h}.{p}.{_b64url_encode(sig)}"
+    """Create a signed JWT using python-jose."""
+    return jwt.encode(payload, secret, algorithm=config.JWT_ALGORITHM)
 
 
 def decode_jwt(token: str, secret: str = config.JWT_SECRET) -> dict[str, Any]:
     """Decode and verify a JWT. Raises on invalid / expired tokens."""
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise ValueError("Invalid token format")
-    h, p, s = parts
-    expected_sig = hmac.new(secret.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()
-    actual_sig = _b64url_decode(s)
-    if not hmac.compare_digest(expected_sig, actual_sig):
-        raise ValueError("Invalid signature")
-    payload = json.loads(_b64url_decode(p))
-    if "exp" in payload and float(payload["exp"]) < time.time():
-        raise ValueError("Token expired")
+    try:
+        payload = jwt.decode(token, secret, algorithms=[config.JWT_ALGORITHM])
+    except JWTError as exc:
+        raise ValueError(str(exc)) from exc
     return payload
 
 

@@ -1,18 +1,24 @@
 """WebSocket endpoint for real-time SCADA data streaming.
 
-Generates simulated SCADA telemetry — water level, flow rate and pressure —
-using sinusoidal curves with Gaussian noise.  Sends one JSON frame per second.
+Generates simulated SCADA telemetry -- water level, flow rate and pressure --
+using sinusoidal curves with Gaussian noise.  Sends one JSON frame per interval.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import random
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from backend import config
+from backend.deps import decode_jwt
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["websocket"])
 
@@ -50,10 +56,26 @@ async def scada_stream(websocket: WebSocket):
     """Stream simulated SCADA data.
 
     Query params:
-        stations — comma-separated list of station IDs to subscribe to.
-                   If omitted, all stations are streamed.
+        token    -- JWT token for authentication (required).
+        stations -- comma-separated list of station IDs to subscribe to.
+                    If omitted, all stations are streamed.
     """
+    # --- Authenticate before accepting the connection ---
+    token = websocket.query_params.get("token")
+    if not token:
+        logger.warning("WebSocket connection rejected: missing token")
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return
+
+    try:
+        decode_jwt(token)
+    except ValueError:
+        logger.warning("WebSocket connection rejected: invalid token")
+        await websocket.close(code=4003, reason="Invalid or expired token")
+        return
+
     await websocket.accept()
+    logger.info("WebSocket SCADA client connected")
 
     raw = websocket.query_params.get("stations", "")
     if raw:
@@ -66,8 +88,9 @@ async def scada_stream(websocket: WebSocket):
             t = time.time()
             frame = [_simulate_reading(sid, t) for sid in stations]
             await websocket.send_text(json.dumps(frame))
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(config.SCADA_WS_INTERVAL)
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket SCADA client disconnected")
     except Exception:
+        logger.error("WebSocket error, closing connection", exc_info=True)
         await websocket.close()
