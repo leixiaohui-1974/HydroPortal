@@ -3,6 +3,16 @@ import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../hooks/useAuth';
 
+export function shouldShowDemoCredentials(env = import.meta.env) {
+  const raw = env?.VITE_HYDROPORTAL_DEMO_AUTH;
+  const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : undefined;
+  const hasExplicitDemoAuth = normalized !== undefined && normalized !== '';
+
+  return hasExplicitDemoAuth
+    ? ['1', 'true', 'yes', 'on'].includes(normalized)
+    : Boolean(env?.DEV);
+}
+
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -11,11 +21,7 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const demoAuthEnv = import.meta.env.VITE_HYDROPORTAL_DEMO_AUTH?.trim().toLowerCase();
-  const hasExplicitDemoAuth = demoAuthEnv !== undefined && demoAuthEnv !== '';
-  const showDemoCredentials = hasExplicitDemoAuth
-    ? ['1', 'true', 'yes', 'on'].includes(demoAuthEnv)
-    : import.meta.env.DEV;
+  const showDemoCredentials = shouldShowDemoCredentials(import.meta.env);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
