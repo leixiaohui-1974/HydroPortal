@@ -18,7 +18,6 @@ try:
     from fastapi.testclient import TestClient
     from backend.app import app
     from backend.deps import (
-        DEMO_USERS,
         create_jwt,
         decode_jwt,
         init_app_registry,
