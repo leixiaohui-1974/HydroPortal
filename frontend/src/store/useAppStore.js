@@ -146,11 +146,7 @@ export function AppStoreProvider({ children }) {
     updateSettings,
   };
 
-  return (
-    <AppStoreContext.Provider value={value}>
-      {children}
-    </AppStoreContext.Provider>
-  );
+  return React.createElement(AppStoreContext.Provider, { value }, children);
 }
 
 export function useAppStore() {

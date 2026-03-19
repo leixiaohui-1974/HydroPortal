@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+
 import { useAuth } from '../hooks/useAuth';
 
 export default function Login() {
@@ -9,6 +10,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  const demoAuthEnv = import.meta.env.VITE_HYDROPORTAL_DEMO_AUTH?.trim().toLowerCase();
+  const hasExplicitDemoAuth = demoAuthEnv !== undefined && demoAuthEnv !== '';
+  const showDemoCredentials = hasExplicitDemoAuth
+    ? ['1', 'true', 'yes', 'on'].includes(demoAuthEnv)
+    : import.meta.env.DEV;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -70,14 +77,16 @@ export default function Login() {
           </button>
         </form>
 
-        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500 mb-2">演示账号：</p>
-          <div className="text-xs text-gray-600 space-y-1">
-            <p>admin / admin123 (管理员)</p>
-            <p>designer / design123 (设计师)</p>
-            <p>operator / oper123 (调度员)</p>
+        {showDemoCredentials && (
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-500 mb-2">演示账号：</p>
+            <div className="text-xs text-gray-600 space-y-1">
+              <p>admin / admin123 (管理员)</p>
+              <p>designer / design123 (设计师)</p>
+              <p>operator / oper123 (调度员)</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

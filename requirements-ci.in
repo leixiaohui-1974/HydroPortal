@@ -1,0 +1,3 @@
+# Backend CI environment source file.
+# Re-lock requirements-ci.txt after changing pyproject.toml dependencies.
+-e .[dev]

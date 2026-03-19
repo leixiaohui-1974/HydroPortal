@@ -37,10 +37,10 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
-      {children}
-    </AuthContext.Provider>
+  return React.createElement(
+    AuthContext.Provider,
+    { value: { user, loading, login, logout } },
+    children
   );
 }
 

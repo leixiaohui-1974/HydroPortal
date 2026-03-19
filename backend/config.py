@@ -15,6 +15,13 @@ from pydantic import BaseModel
 _logger = logging.getLogger(__name__)
 
 
+def _as_bool(raw: str | None, default: bool = False) -> bool:
+    """Parse common truthy values from env vars."""
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class AppEndpoint(BaseModel):
     """Descriptor for a downstream Hydro application."""
 
@@ -31,6 +38,10 @@ class AppEndpoint(BaseModel):
 PORTAL_HOST: str = os.environ.get("HYDROPORTAL_HOST", "0.0.0.0")
 PORTAL_PORT: int = int(os.environ.get("HYDROPORTAL_PORT", "8000"))
 
+# Runtime mode
+APP_ENV: str = os.environ.get("HYDROPORTAL_ENV", "development").strip().lower()
+IS_PRODUCTION: bool = APP_ENV in {"prod", "production"}
+
 # Database
 DATABASE_URL: str = os.environ.get(
     "HYDROPORTAL_DATABASE_URL",
@@ -38,10 +49,11 @@ DATABASE_URL: str = os.environ.get(
 )
 
 # JWT / Auth
+DEFAULT_JWT_SECRET = "hydroportal-dev-secret-change-in-production"
 JWT_SECRET: str = os.environ.get(
-    "HYDROPORTAL_JWT_SECRET", "hydroportal-dev-secret-change-in-production"
+    "HYDROPORTAL_JWT_SECRET", DEFAULT_JWT_SECRET
 )
-if JWT_SECRET == "hydroportal-dev-secret-change-in-production":
+if JWT_SECRET == DEFAULT_JWT_SECRET:
     _logger.warning(
         "SECURITY WARNING: Using default JWT secret. "
         "Set HYDROPORTAL_JWT_SECRET environment variable in production."
@@ -78,6 +90,16 @@ LOG_LEVEL: str = os.environ.get("HYDROPORTAL_LOG_LEVEL", "INFO").upper()
 # SCADA WebSocket
 SCADA_WS_INTERVAL: float = float(
     os.environ.get("HYDROPORTAL_SCADA_WS_INTERVAL", "1.0")
+)
+
+# Demo/dev auth mode
+DEMO_AUTH_ENABLED: bool = _as_bool(
+    os.environ.get("HYDROPORTAL_DEMO_AUTH_ENABLED"),
+    default=not IS_PRODUCTION,
+)
+ALLOW_DEMO_AUTH_IN_PRODUCTION: bool = _as_bool(
+    os.environ.get("HYDROPORTAL_ALLOW_DEMO_AUTH_IN_PRODUCTION"),
+    default=False,
 )
 
 # ---------------------------------------------------------------------------
@@ -121,3 +143,16 @@ _DEFAULT_SKILL_ROUTES: dict[str, str] = {
 SKILL_ROUTES: dict[str, str] = json.loads(
     os.environ.get("HYDROPORTAL_SKILL_ROUTES", json.dumps(_DEFAULT_SKILL_ROUTES))
 )
+
+
+def validate_security_settings() -> None:
+    """Fail fast when unsafe defaults are used in production mode."""
+    if IS_PRODUCTION and JWT_SECRET == DEFAULT_JWT_SECRET:
+        raise RuntimeError(
+            "HYDROPORTAL_JWT_SECRET must be set to a non-default value in production."
+        )
+    if IS_PRODUCTION and DEMO_AUTH_ENABLED and not ALLOW_DEMO_AUTH_IN_PRODUCTION:
+        raise RuntimeError(
+            "Demo auth is disabled in production by default. "
+            "Set HYDROPORTAL_ALLOW_DEMO_AUTH_IN_PRODUCTION=true to override explicitly."
+        )

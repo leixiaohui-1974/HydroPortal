@@ -4,8 +4,16 @@ from httpx import AsyncClient, ASGITransport
 import pytest
 import pytest_asyncio
 
-from backend.app import app
-from backend.deps import verify_password, create_jwt, decode_jwt, issue_token, _pwd_context
+from backend import config
+from backend.app import app, lifespan
+from backend.deps import (
+    _pwd_context,
+    create_jwt,
+    decode_jwt,
+    get_demo_users,
+    issue_token,
+    verify_password,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +56,34 @@ async def test_login_wrong_password(client: AsyncClient):
 async def test_login_unknown_user(client: AsyncClient):
     resp = await client.post("/api/auth/login", json={"username": "nobody", "password": "x"})
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_disabled_when_demo_auth_off(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(config, "DEMO_AUTH_ENABLED", False)
+    resp = await client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    assert resp.status_code == 503
+    assert "disabled" in resp.json()["detail"]
+
+
+def test_get_demo_users_tracks_runtime_toggle(monkeypatch):
+    monkeypatch.setattr(config, "DEMO_AUTH_ENABLED", False)
+    assert get_demo_users() == {}
+
+    monkeypatch.setattr(config, "DEMO_AUTH_ENABLED", True)
+    assert "admin" in get_demo_users()
+
+
+def test_get_demo_users_refreshes_when_password_env_changes(monkeypatch):
+    monkeypatch.setattr(config, "DEMO_AUTH_ENABLED", True)
+    monkeypatch.setenv("HYDROPORTAL_DEMO_ADMIN_PASSWORD", "first-pass")
+    first_users = get_demo_users()
+
+    monkeypatch.setenv("HYDROPORTAL_DEMO_ADMIN_PASSWORD", "second-pass")
+    second_users = get_demo_users()
+
+    assert verify_password("first-pass", first_users["admin"]["password"])
+    assert verify_password("second-pass", second_users["admin"]["password"])
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +143,49 @@ def test_issue_token_contains_sub_and_role():
     assert decoded["sub"] == "admin"
     assert decoded["role"] == "admin"
     assert "exp" in decoded
+
+
+def test_jwt_helpers_use_runtime_secret(monkeypatch):
+    monkeypatch.setattr(config, "JWT_SECRET", "rotated-secret")
+    token = create_jwt({"sub": "runtime", "role": "admin"})
+    decoded = decode_jwt(token)
+    assert decoded["sub"] == "runtime"
+
+
+def test_security_settings_reject_default_secret_in_production(monkeypatch):
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "JWT_SECRET", config.DEFAULT_JWT_SECRET)
+    monkeypatch.setattr(config, "DEMO_AUTH_ENABLED", False)
+    with pytest.raises(RuntimeError, match="HYDROPORTAL_JWT_SECRET"):
+        config.validate_security_settings()
+
+
+def test_security_settings_reject_demo_auth_in_production(monkeypatch):
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "JWT_SECRET", "non-default-secret")
+    monkeypatch.setattr(config, "DEMO_AUTH_ENABLED", True)
+    monkeypatch.setattr(config, "ALLOW_DEMO_AUTH_IN_PRODUCTION", False)
+    with pytest.raises(RuntimeError, match="Demo auth is disabled"):
+        config.validate_security_settings()
+
+
+def test_security_settings_allow_explicit_demo_override(monkeypatch):
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "JWT_SECRET", "non-default-secret")
+    monkeypatch.setattr(config, "DEMO_AUTH_ENABLED", True)
+    monkeypatch.setattr(config, "ALLOW_DEMO_AUTH_IN_PRODUCTION", True)
+    config.validate_security_settings()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_fails_fast_on_invalid_security_config(monkeypatch):
+    def _raise() -> None:
+        raise RuntimeError("invalid security config")
+
+    monkeypatch.setattr(config, "validate_security_settings", _raise)
+    with pytest.raises(RuntimeError, match="invalid security config"):
+        async with lifespan(app):
+            pass
 
 
 # ---------------------------------------------------------------------------

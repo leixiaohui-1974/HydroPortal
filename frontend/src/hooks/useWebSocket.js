@@ -13,9 +13,7 @@ export function useWebSocket(url, { enabled = true, onMessage } = {}) {
 
   const connect = useCallback(() => {
     if (!enabled) return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const fullUrl = `${protocol}://${window.location.host}${url}`;
+    const fullUrl = buildWebSocketUrl(url);
     const ws = new WebSocket(fullUrl);
 
     ws.onopen = () => setConnected(true);
@@ -55,6 +53,29 @@ export function useWebSocket(url, { enabled = true, onMessage } = {}) {
   }, []);
 
   return { connected, lastData, send };
+}
+
+export function buildWebSocketUrl(
+  url,
+  { location = (typeof window !== 'undefined' ? window.location : null), token } = {}
+) {
+  if (!location) {
+    throw new Error('location is required to build websocket url');
+  }
+
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const isAbsolute = url.startsWith('ws://') || url.startsWith('wss://');
+  const parsed = isAbsolute ? new URL(url) : new URL(url, `${protocol}://${location.host}`);
+  const isSameOrigin = parsed.host === location.host;
+
+  const authToken =
+    token ??
+    (typeof window !== 'undefined' ? window.localStorage.getItem('hydro_token') : null);
+  if (authToken && isSameOrigin && !parsed.searchParams.has('token')) {
+    parsed.searchParams.set('token', authToken);
+  }
+
+  return parsed.toString();
 }
 
 export default useWebSocket;

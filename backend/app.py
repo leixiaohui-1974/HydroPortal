@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
+    config.validate_security_settings()
+    logger.info("Security configuration validated for env=%s.", config.APP_ENV)
     # Initialize SQLite database tables
     init_db()
     logger.info("Database initialized.")

@@ -20,11 +20,19 @@ pip install -e ".[dev]"
 uvicorn backend.app:app --reload --port 8000
 ```
 
+For a reproducible backend test environment:
+
+```bash
+pip install -r requirements-ci.txt
+pip install -e .
+python -m pytest tests/test_backend -q
+```
+
 ### Frontend
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 

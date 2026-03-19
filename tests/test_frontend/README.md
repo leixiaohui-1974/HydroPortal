@@ -1,1 +1,1 @@
-Run: cd frontend && npx vitest run
+Run: cd frontend && npm ci && npx vitest run
