@@ -5,7 +5,7 @@ import client from '../api/client';
 // State shape
 // ---------------------------------------------------------------------------
 
-const initialState = {
+export const initialState = {
   user: null,
   alerts: [],
   stations: [],
@@ -25,7 +25,7 @@ const initialState = {
 // Reducer
 // ---------------------------------------------------------------------------
 
-const ACTION = {
+export const ACTION = {
   SET_USER: 'SET_USER',
   SET_ALERTS: 'SET_ALERTS',
   SET_STATIONS: 'SET_STATIONS',
@@ -37,7 +37,7 @@ const ACTION = {
   LOGOUT: 'LOGOUT',
 };
 
-function reducer(state, action) {
+export function reducer(state, action) {
   switch (action.type) {
     case ACTION.SET_USER:
       return { ...state, user: action.payload };
