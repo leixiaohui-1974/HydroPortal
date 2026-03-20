@@ -74,4 +74,5 @@ async def check_compliance(
         path="/api/compliance/check",
         json_body=body,
         mock_data=mock_result,
+        fallback_on_http_error=False,
     )

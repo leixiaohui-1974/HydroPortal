@@ -25,6 +25,7 @@ try:
         issue_token,
         verify_password,
     )
+    from backend.config import AppEndpoint
     from backend import config
     _DEPS_OK = True
 except ImportError as _import_err:
@@ -357,7 +358,7 @@ class TestRoleBasedAccessControl:
         tools = resp.json()
 
         apps_with_tools = {t["app_id"] for t in tools}
-        expected = {"guard", "design", "lab", "edu", "arena"}
+        expected = set(get_app_registry().keys())
         missing = expected - apps_with_tools
         assert len(missing) == 0, (
             f"No tools registered for apps: {missing}"
@@ -418,6 +419,106 @@ class TestGatewayRouting:
         assert resp.status_code == 200
         data = resp.json()
         assert data["app_id"] == "design"
+
+
+class TestRegistryConsistency:
+    """Ensure discovery snapshot is reflected consistently across endpoints."""
+
+    def test_end_to_end_registry_consistency_for_health_chat_skill(self, client, admin_token, monkeypatch):
+        discovered = {
+            "design": AppEndpoint(
+                app_id="design",
+                name="HydroDesign",
+                base_url="http://localhost:8102",
+                available_tools=["check_compliance"],
+                tool_catalog=[{"name": "check_compliance", "description": "Run compliance check"}],
+                role_names=["designer"],
+                routing_hints=["designer", "check_compliance", "optimization_design"],
+                source="workspace",
+            ),
+            "guard": AppEndpoint(
+                app_id="guard",
+                name="HydroGuard",
+                base_url="http://localhost:8101",
+                available_tools=["station.collect_data"],
+                tool_catalog=[{"name": "station.collect_data", "description": "Collect station data"}],
+                role_names=["operator"],
+                routing_hints=["operator", "station.collect_data"],
+                source="workspace",
+            ),
+        }
+
+        monkeypatch.setattr("backend.deps.discover_hydromind_apps", lambda: discovered)
+        init_app_registry()
+
+        class FakeResponse:
+            def __init__(self, status_code, payload=None, headers=None):
+                self.status_code = status_code
+                self._payload = payload if payload is not None else {}
+                self.headers = headers or {"content-type": "application/json"}
+
+            def json(self):
+                return self._payload
+
+            @property
+            def text(self):
+                return str(self._payload)
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                self.calls = []
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def get(self, url, *args, **kwargs):
+                self.calls.append(("GET", url, None))
+                return FakeResponse(200, {"status": "ok"})
+
+            async def post(self, url, *args, **kwargs):
+                self.calls.append(("POST", url, kwargs.get("json")))
+                if url.endswith("/api/chat"):
+                    return FakeResponse(200, {"reply": "ok", "tool_calls": []})
+                return FakeResponse(200, {"status": "ok", "result": {"accepted": True}})
+
+        fake_client = FakeAsyncClient()
+
+        class ClientFactory:
+            def __call__(self, *args, **kwargs):
+                return fake_client
+
+        monkeypatch.setattr("backend.routers.gateway.httpx.AsyncClient", ClientFactory())
+
+        apps_resp = client.get("/api/apps/list", headers=_auth_header(admin_token))
+        assert apps_resp.status_code == 200
+        app_ids = {item["app_id"] for item in apps_resp.json()}
+        assert app_ids == {"design", "guard"}
+
+        health_resp = client.get("/api/gateway/health")
+        assert health_resp.status_code == 200
+        assert set(health_resp.json()["apps"].keys()) == {"design", "guard"}
+
+        chat_resp = client.post(
+            "/api/gateway/chat",
+            json={"message": "please run check_compliance"},
+            headers=_auth_header(admin_token),
+        )
+        assert chat_resp.status_code == 200
+        assert chat_resp.json()["app_id"] == "design"
+
+        skill_resp = client.post(
+            "/api/gateway/skill",
+            json={"skill_name": "check_compliance", "params": {"scheme": "A"}},
+            headers=_auth_header(admin_token),
+        )
+        assert skill_resp.status_code == 200
+
+        urls = [call[1] for call in fake_client.calls]
+        assert "http://localhost:8102/api/chat" in urls
+        assert "http://localhost:8102/api/skill" in urls
 
     def test_unknown_app_id_returns_message(self, client, admin_token):
         """An unknown app_id should return an informative message."""

@@ -23,9 +23,9 @@ async def test_list_apps(auth_client: AsyncClient):
     assert resp.status_code == 200
     apps_list = resp.json()
     assert isinstance(apps_list, list)
-    assert len(apps_list) == 5
     ids = {a["app_id"] for a in apps_list}
-    assert ids == {"guard", "design", "lab", "edu", "arena"}
+    assert {"guard", "design", "lab", "edu", "arena"}.issubset(ids)
+    assert all(a["base_url"] for a in apps_list)
 
 
 @pytest.mark.asyncio

@@ -79,6 +79,28 @@ class AppInfo(BaseModel):
     available_tools: list[str] = Field(default_factory=list)
 
 
+class CapabilityToolInfo(BaseModel):
+    tool_name: str
+    description: str = ""
+
+
+class CapabilityAppInfo(BaseModel):
+    app_id: str
+    name: str
+    version: str = "unknown"
+    base_url: str = ""
+    source: str = "static"
+    role_names: list[str] = Field(default_factory=list)
+    routing_hints: list[str] = Field(default_factory=list)
+    tools: list[CapabilityToolInfo] = Field(default_factory=list)
+
+
+class CapabilitySnapshot(BaseModel):
+    apps: list[CapabilityAppInfo] = Field(default_factory=list)
+    app_count: int = 0
+    tool_count: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Guard domain
 # ---------------------------------------------------------------------------

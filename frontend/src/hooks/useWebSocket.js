@@ -8,19 +8,30 @@ import { useEffect, useRef, useState, useCallback } from 'react';
  */
 export function useWebSocket(url, { enabled = true, onMessage } = {}) {
   const wsRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const generationRef = useRef(0);
   const [connected, setConnected] = useState(false);
   const [lastData, setLastData] = useState(null);
 
-  const connect = useCallback(() => {
-    if (!enabled) return;
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const connect = useCallback((generation) => {
+    if (!enabled || generation !== generationRef.current) return;
     const fullUrl = buildWebSocketUrl(url);
     const ws = new WebSocket(fullUrl);
 
     ws.onopen = () => setConnected(true);
     ws.onclose = () => {
       setConnected(false);
+      if (!enabled || generation !== generationRef.current) return;
       // Auto-reconnect after 3s
-      setTimeout(() => connect(), 3000);
+      clearReconnectTimer();
+      reconnectTimerRef.current = setTimeout(() => connect(generation), 3000);
     };
     ws.onerror = () => ws.close();
     ws.onmessage = (event) => {
@@ -34,17 +45,22 @@ export function useWebSocket(url, { enabled = true, onMessage } = {}) {
     };
 
     wsRef.current = ws;
-  }, [url, enabled, onMessage]);
+  }, [url, enabled, onMessage, clearReconnectTimer]);
 
   useEffect(() => {
-    connect();
+    generationRef.current += 1;
+    const generation = generationRef.current;
+    clearReconnectTimer();
+    connect(generation);
     return () => {
+      generationRef.current += 1;
+      clearReconnectTimer();
       if (wsRef.current) {
         wsRef.current.onclose = null; // prevent reconnect on unmount
         wsRef.current.close();
       }
     };
-  }, [connect]);
+  }, [connect, clearReconnectTimer]);
 
   const send = useCallback((msg) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

@@ -3,20 +3,35 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from backend import config
+from backend.plugin_discovery import discover_hydromind_apps
 
 # ---------------------------------------------------------------------------
 # Password hashing
 # ---------------------------------------------------------------------------
+
+
+def _ensure_bcrypt_version_shim() -> None:
+    """Backfill bcrypt.__about__.__version__ for passlib 1.7.x compatibility."""
+    if hasattr(bcrypt, "__about__"):
+        return
+    version = getattr(bcrypt, "__version__", None)
+    if version:
+        bcrypt.__about__ = SimpleNamespace(__version__=version)
+
+
+_ensure_bcrypt_version_shim()
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -116,10 +131,14 @@ async def get_current_user(
     demo_users = get_demo_users()
     if username not in demo_users:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown user")
+    expected_role = demo_users[username]["role"]
+    token_role = payload.get("role")
+    if token_role != expected_role:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token role mismatch")
 
     return {
         "username": username,
-        "role": payload["role"],
+        "role": expected_role,
         "display_name": demo_users[username]["display_name"],
     }
 
@@ -132,7 +151,12 @@ _app_registry: dict[str, config.AppEndpoint] = {}
 
 
 def init_app_registry() -> None:
-    """Populate the app registry from config."""
+    """Populate the app registry from discovery first, then config fallback."""
+    _app_registry.clear()
+    discovered = discover_hydromind_apps()
+    if discovered:
+        _app_registry.update(discovered)
+        return
     for app in config.HYDRO_APPS:
         _app_registry[app.app_id] = app
 

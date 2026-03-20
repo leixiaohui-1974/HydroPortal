@@ -7,13 +7,17 @@ import pytest_asyncio
 from backend import config
 from backend.app import app, lifespan
 from backend.deps import (
+    _ensure_bcrypt_version_shim,
     _pwd_context,
     create_jwt,
     decode_jwt,
+    get_current_user,
     get_demo_users,
     issue_token,
     verify_password,
 )
+from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +119,15 @@ def test_bcrypt_verify_correct():
     assert verify_password("test_pass_123", hashed) is True
 
 
+def test_bcrypt_about_shim_present():
+    import bcrypt
+
+    _ensure_bcrypt_version_shim()
+
+    assert hasattr(bcrypt, "__about__")
+    assert getattr(bcrypt.__about__, "__version__", None) == bcrypt.__version__
+
+
 def test_bcrypt_verify_wrong():
     hashed = _pwd_context.hash("correct")
     assert verify_password("wrong", hashed) is False
@@ -143,6 +156,14 @@ def test_issue_token_contains_sub_and_role():
     assert decoded["sub"] == "admin"
     assert decoded["role"] == "admin"
     assert "exp" in decoded
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_rejects_role_mismatch():
+    token = issue_token("operator", "admin")
+    cred = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    with pytest.raises(HTTPException, match="Token role mismatch"):
+        await get_current_user(cred)
 
 
 def test_jwt_helpers_use_runtime_secret(monkeypatch):

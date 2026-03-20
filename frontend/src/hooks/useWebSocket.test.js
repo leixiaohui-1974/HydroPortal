@@ -1,6 +1,70 @@
-import { describe, expect, test } from 'vitest';
+// @vitest-environment happy-dom
 
-import { buildWebSocketUrl } from './useWebSocket';
+import React from 'react';
+import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
+import useWebSocket, { buildWebSocketUrl } from './useWebSocket';
+
+class MockWebSocket {
+  static OPEN = 1;
+  static instances = [];
+
+  constructor(url) {
+    this.url = url;
+    this.readyState = MockWebSocket.OPEN;
+    this.close = vi.fn(() => {
+      this.readyState = 3;
+      if (this.onclose) {
+        this.onclose();
+      }
+    });
+    this.send = vi.fn();
+    this.onopen = null;
+    this.onclose = null;
+    this.onerror = null;
+    this.onmessage = null;
+    MockWebSocket.instances.push(this);
+  }
+}
+
+function WebSocketProbe({ url, enabled }) {
+  const { connected } = useWebSocket(url, { enabled });
+  return React.createElement('div', { 'data-testid': 'connected' }, String(connected));
+}
+
+describe('useWebSocket', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  test('does not reconnect after the hook is disabled', () => {
+    const view = render(React.createElement(WebSocketProbe, { url: '/ws/scada', enabled: true }));
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    act(() => {
+      MockWebSocket.instances[0].onclose();
+    });
+
+    view.rerender(React.createElement(WebSocketProbe, { url: '/ws/scada', enabled: false }));
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+  });
+});
 
 describe('buildWebSocketUrl', () => {
   test('appends token when missing', () => {

@@ -22,6 +22,22 @@ def _as_bool(raw: str | None, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _load_json_env(name: str, default: object, expected_type: type):
+    """Load and type-check JSON config from an environment variable."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{name} must contain valid JSON") from exc
+    if not isinstance(value, expected_type):
+        raise RuntimeError(
+            f"{name} must decode to {expected_type.__name__}, got {type(value).__name__}"
+        )
+    return value
+
+
 class AppEndpoint(BaseModel):
     """Descriptor for a downstream Hydro application."""
 
@@ -29,6 +45,12 @@ class AppEndpoint(BaseModel):
     name: str
     base_url: str
     enabled: bool = True
+    available_tools: list[str] = []
+    tool_catalog: list[dict[str, str]] = []
+    role_names: list[str] = []
+    routing_hints: list[str] = []
+    source: str = "static"
+    version: str = "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -72,16 +94,16 @@ RATE_LIMIT_WINDOW_SECONDS: int = int(
 )
 
 # CORS
-CORS_ORIGINS: list[str] = json.loads(
-    os.environ.get(
-        "HYDROPORTAL_CORS_ORIGINS",
-        json.dumps([
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:5173",
-        ]),
-    )
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+CORS_ORIGINS: list[str] = _load_json_env(
+    "HYDROPORTAL_CORS_ORIGINS",
+    _DEFAULT_CORS_ORIGINS,
+    list,
 )
 
 # Logging
@@ -116,9 +138,7 @@ _DEFAULT_APPS = [
 
 HYDRO_APPS: list[AppEndpoint] = [
     AppEndpoint(**app_def)
-    for app_def in json.loads(
-        os.environ.get("HYDROPORTAL_APPS", json.dumps(_DEFAULT_APPS))
-    )
+    for app_def in _load_json_env("HYDROPORTAL_APPS", _DEFAULT_APPS, list)
 ]
 
 # Convenience: per-domain downstream URLs (overridable individually)
@@ -140,8 +160,10 @@ _DEFAULT_SKILL_ROUTES: dict[str, str] = {
     "arena": ARENA_UPSTREAM_URL,
 }
 
-SKILL_ROUTES: dict[str, str] = json.loads(
-    os.environ.get("HYDROPORTAL_SKILL_ROUTES", json.dumps(_DEFAULT_SKILL_ROUTES))
+SKILL_ROUTES: dict[str, str] = _load_json_env(
+    "HYDROPORTAL_SKILL_ROUTES",
+    _DEFAULT_SKILL_ROUTES,
+    dict,
 )
 
 

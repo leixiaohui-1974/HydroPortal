@@ -84,4 +84,5 @@ async def submit_solution(body: dict, user: dict = Depends(get_current_user)):
         path="/api/submit",
         json_body=body,
         mock_data=mock_result,
+        fallback_on_http_error=False,
     )

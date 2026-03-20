@@ -62,3 +62,11 @@ def test_production_demo_auth_override_requires_explicit_allow(reloaded_config):
     assert config.DEMO_AUTH_ENABLED is True
     assert config.ALLOW_DEMO_AUTH_IN_PRODUCTION is True
     config.validate_security_settings()
+
+
+def test_invalid_cors_json_fails_fast(monkeypatch):
+    monkeypatch.setenv("HYDROPORTAL_CORS_ORIGINS", "not-json")
+    with pytest.raises(RuntimeError, match="HYDROPORTAL_CORS_ORIGINS must contain valid JSON"):
+        importlib.reload(config_module)
+    monkeypatch.delenv("HYDROPORTAL_CORS_ORIGINS", raising=False)
+    importlib.reload(config_module)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -22,6 +23,27 @@ from backend.models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
+
+
+def _read_response_payload(resp: httpx.Response):
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Downstream service returned an invalid JSON payload.",
+        ) from exc
+
+
+def _read_error_detail(resp: httpx.Response):
+    content_type = resp.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            return resp.json()
+        except ValueError:
+            pass
+    text = resp.text.strip()
+    return text or f"Downstream service returned HTTP {resp.status_code}"
 
 # ---------------------------------------------------------------------------
 # Routing heuristic: keyword -> app_id
@@ -44,7 +66,39 @@ _KEYWORD_MAP: dict[str, str] = {
 }
 
 
+def _find_registry_app_by_message(message: str) -> str | None:
+    registry = get_app_registry()
+    lower = message.lower()
+    message_tokens = set(re.findall(r"[a-z0-9]+", lower))
+    best_app_id: str | None = None
+    best_score = 0
+
+    for app_id, endpoint in registry.items():
+        candidates = [app_id, endpoint.name.lower(), *endpoint.role_names, *endpoint.routing_hints]
+        for hint in candidates:
+            token = str(hint).strip().lower()
+            if len(token) < 3:
+                continue
+            parts = [part for part in re.split(r"[^a-z0-9]+", token) if len(part) >= 3]
+            if not parts:
+                continue
+            if len(parts) == 1:
+                matched = parts[0] in message_tokens or parts[0] in lower
+                score = len(parts[0])
+            else:
+                matched = all(part in message_tokens or part in lower for part in parts)
+                score = sum(len(part) for part in parts)
+            if matched and score > best_score:
+                best_app_id = app_id
+                best_score = score
+
+    return best_app_id
+
+
 def _route_message(message: str) -> str:
+    registry_match = _find_registry_app_by_message(message)
+    if registry_match:
+        return registry_match
     lower = message.lower()
     for kw, aid in _KEYWORD_MAP.items():
         if kw in lower:
@@ -52,15 +106,34 @@ def _route_message(message: str) -> str:
     return "guard"  # default
 
 
-def _resolve_skill_url(skill_name: str) -> str | None:
-    """Resolve a skill name to its downstream service URL.
+def _resolve_skill_endpoint(skill_name: str):
+    """Resolve a skill name to its downstream app endpoint.
 
     Skill names use dotted notation: ``<domain>.<action>``
     (e.g. ``guard.get_alerts``, ``design.check_compliance``).
-    The prefix before the first dot is matched against the route table.
+    Prefer discovered tool metadata, then app-id prefix fallback, then static routes.
     """
-    prefix = skill_name.split(".")[0] if "." in skill_name else skill_name
-    return config.SKILL_ROUTES.get(prefix)
+    registry = get_app_registry()
+    normalized = skill_name.strip().lower()
+
+    for endpoint in registry.values():
+        for item in endpoint.tool_catalog:
+            if item.get("name", "").strip().lower() == normalized:
+                return endpoint
+
+    prefix = normalized.split(".")[0] if "." in normalized else normalized
+    endpoint = registry.get(prefix)
+    if endpoint is not None:
+        return endpoint
+
+    downstream_url = config.SKILL_ROUTES.get(prefix)
+    if downstream_url is None:
+        return None
+
+    for endpoint in registry.values():
+        if endpoint.base_url == downstream_url:
+            return endpoint
+    return type("FallbackEndpoint", (), {"app_id": prefix, "base_url": downstream_url, "name": prefix})()
 
 
 # ---------------------------------------------------------------------------
@@ -91,14 +164,50 @@ async def gateway_chat(
                 f"{endpoint.base_url}/api/chat",
                 json={"message": req.message, "context": req.context},
             )
-            data = resp.json()
+            if resp.status_code >= 400:
+                if resp.status_code >= 500:
+                    logger.warning(
+                        "Chat downstream %s returned %d; using unavailable fallback",
+                        app_id,
+                        resp.status_code,
+                    )
+                    return ChatResponse(
+                        reply=f"[{endpoint.name}] 服务暂不可达，请稍后重试。",
+                        app_id=app_id,
+                    )
+                logger.warning(
+                    "Chat downstream %s returned %d",
+                    app_id,
+                    resp.status_code,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "app_id": app_id,
+                        "downstream_status": resp.status_code,
+                        "detail": _read_error_detail(resp),
+                    },
+                )
+            try:
+                data = _read_response_payload(resp)
+            except HTTPException:
+                logger.warning(
+                    "Chat downstream %s returned invalid JSON; using unavailable fallback",
+                    app_id,
+                )
+                return ChatResponse(
+                    reply=f"[{endpoint.name}] 服务暂不可达，请稍后重试。",
+                    app_id=app_id,
+                )
             logger.info("Chat forwarded to %s, status=%d", app_id, resp.status_code)
             return ChatResponse(
                 reply=data.get("reply", str(data)),
                 app_id=app_id,
                 tool_calls=data.get("tool_calls", []),
             )
-    except Exception:
+    except HTTPException:
+        raise
+    except httpx.HTTPError:
         logger.warning("Downstream %s unreachable for chat", app_id, exc_info=True)
         return ChatResponse(
             reply=f"[{endpoint.name}] 服务暂不可达，请稍后重试。",
@@ -117,8 +226,8 @@ async def gateway_skill(
     to the downstream MCP service.  The downstream service is expected to
     expose a ``POST /api/skill`` endpoint that accepts ``{skill_name, params, role}``.
     """
-    downstream_url = _resolve_skill_url(req.skill_name)
-    if downstream_url is None:
+    endpoint = _resolve_skill_endpoint(req.skill_name)
+    if endpoint is None:
         logger.warning("No route found for skill: %s", req.skill_name)
         raise HTTPException(
             status_code=404,
@@ -134,19 +243,19 @@ async def gateway_skill(
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                f"{downstream_url}/api/skill",
+                f"{endpoint.base_url}/api/skill",
                 json=payload,
             )
         if resp.status_code >= 400:
             logger.error(
-                "Downstream skill error: %s returned %d", downstream_url, resp.status_code
+                "Downstream skill error: %s returned %d", endpoint.base_url, resp.status_code
             )
             raise HTTPException(
                 status_code=resp.status_code,
-                detail=resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
+                detail=_read_error_detail(resp),
             )
-        data = resp.json()
-        logger.info("Skill '%s' executed successfully via %s", req.skill_name, downstream_url)
+        data = _read_response_payload(resp)
+        logger.info("Skill '%s' executed successfully via %s", req.skill_name, endpoint.base_url)
         return SkillResponse(
             result=data.get("result", data),
             status=data.get("status", "ok"),
@@ -186,34 +295,17 @@ async def gateway_tools(user: dict = Depends(get_current_user)):
     registry = get_app_registry()
     tools: list[ToolInfo] = []
 
-    # Predefined tool catalog (in production, discovered dynamically)
-    _TOOL_CATALOG: dict[str, list[tuple[str, str]]] = {
-        "guard": [
-            ("guard.list_stations", "List all monitoring stations"),
-            ("guard.get_alerts", "Get active alerts"),
-            ("guard.create_dispatch", "Create a dispatch command"),
-            ("guard.scada_query", "Query SCADA time-series data"),
-        ],
-        "design": [
-            ("design.list_projects", "List design projects"),
-            ("design.check_compliance", "Run compliance check on a scheme"),
-        ],
-        "lab": [
-            ("lab.search_literature", "Search academic literature"),
-            ("lab.run_experiment", "Run a simulation experiment"),
-        ],
-        "edu": [
-            ("edu.list_courses", "List available courses"),
-            ("edu.submit_quiz", "Submit quiz answers"),
-        ],
-        "arena": [
-            ("arena.list_contests", "List active contests"),
-            ("arena.submit_solution", "Submit a contest solution"),
-        ],
-    }
-
-    for app_id in registry:
-        for tool_name, desc in _TOOL_CATALOG.get(app_id, []):
-            tools.append(ToolInfo(tool_name=tool_name, app_id=app_id, description=desc))
+    for app_id, endpoint in registry.items():
+        for item in endpoint.tool_catalog:
+            tool_name = item.get("name", "")
+            if not tool_name:
+                continue
+            tools.append(
+                ToolInfo(
+                    tool_name=tool_name,
+                    app_id=app_id,
+                    description=item.get("description", ""),
+                )
+            )
 
     return tools

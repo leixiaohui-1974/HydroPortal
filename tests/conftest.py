@@ -15,7 +15,8 @@ def _reset_rate_limiter():
     default_limiter._buckets.clear()
 
 
-@pytest.fixture(autouse=True, scope="session")
+@pytest.fixture(autouse=True)
 def _init_registry():
-    """Ensure the app registry is populated for all tests."""
+    """Ensure the app registry is freshly populated for each test."""
     init_app_registry()
+    yield

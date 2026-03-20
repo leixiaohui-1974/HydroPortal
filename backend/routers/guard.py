@@ -93,6 +93,7 @@ async def acknowledge_alert(alert_id: str, user: dict = Depends(get_current_user
         method="POST",
         path=f"/api/alerts/{alert_id}/ack",
         mock_data=mock_result,
+        fallback_on_http_error=False,
     )
     return data
 
@@ -113,5 +114,6 @@ async def create_dispatch(cmd: DispatchCommand, user: dict = Depends(get_current
         path="/api/dispatch",
         json_body={"station_id": cmd.station_id, "command": cmd.command, "params": cmd.params},
         mock_data=mock_result,
+        fallback_on_http_error=False,
     )
     return data
