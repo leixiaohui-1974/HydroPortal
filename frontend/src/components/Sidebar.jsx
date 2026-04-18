@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: '/guard', label: 'HydroGuard', icon: '🛡️', roles: ['admin', 'operator'] },
   { to: '/design', label: 'HydroDesign', icon: '📐', roles: ['admin', 'designer'] },
   { to: '/lab', label: 'HydroLab', icon: '🔬', roles: ['admin', 'designer'] },
+  { to: '/automodel', label: '自动建模', icon: '🧭', roles: ['admin', 'designer'] },
   { to: '/edu', label: 'HydroEdu', icon: '📚', roles: ['admin', 'designer', 'operator'] },
   { to: '/arena', label: 'HydroArena', icon: '🏆', roles: ['admin'] },
   { to: '/settings', label: '设置', icon: '⚙️', roles: ['admin', 'designer', 'operator'] },

@@ -13,6 +13,7 @@ import LabPanel from './pages/LabPanel';
 import EduPanel from './pages/EduPanel';
 import ArenaPanel from './pages/ArenaPanel';
 import Settings from './pages/Settings';
+import AutoModelWorkbench from './pages/AutoModelWorkbench';
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
               <Route path="lab" element={<LabPanel />} />
               <Route path="edu" element={<EduPanel />} />
               <Route path="arena" element={<ArenaPanel />} />
+              <Route path="automodel" element={<AutoModelWorkbench />} />
               <Route path="settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

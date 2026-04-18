@@ -14,7 +14,7 @@ from backend.deps import init_app_registry, get_app_registry
 from backend.logging_config import setup_logging
 from backend.middleware.cors import add_cors
 from backend.middleware.rate_limit import default_limiter
-from backend.routers import gateway, auth, apps, guard, design, lab, edu, arena
+from backend.routers import gateway, auth, apps, guard, design, lab, edu, arena, automodel
 from backend.ws import scada_stream
 
 # Initialise structured logging before anything else
@@ -74,6 +74,7 @@ app.include_router(design.router)
 app.include_router(lab.router)
 app.include_router(edu.router)
 app.include_router(arena.router)
+app.include_router(automodel.router)
 app.include_router(scada_stream.router)
 
 
